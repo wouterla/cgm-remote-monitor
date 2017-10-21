@@ -1,0 +1,32 @@
+version: '2'
+services:
+    nightscout:
+        build: .
+        container_name: "nightscout"
+        image: nightscout
+        environment:
+            - MONGO_CONNECTION=mongodb://nightscout:somepassword@mongodb:27017/nightscout
+            - DISPLAY_UNITS=mmol
+        ports:
+            - 1337:1337
+        links:
+            - mongodb
+        depends_on:
+            - mongo_create_db
+    mongo_create_db:
+       image: mongo:latest
+       container_name: mongo_create_db
+       links:
+        - mongodb
+       command: mongo --host mongodb --eval  "db.getSiblingDB('nightscout').createUser({user:'nightscout', pwd:'somepassword', roles:[{role:'readWrite',db:'nightscout'}]});"
+       depends_on:
+        - mongodb
+    mongodb:
+        image: mongo:latest
+        container_name: "mongodb"
+        environment:
+          - MONGO_DATA_DIR=/data/db
+        volumes:
+          - ./mongodata/db:/data/db
+        ports:
+            - 27017:27017
