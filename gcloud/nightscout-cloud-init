@@ -1,0 +1,110 @@
+#cloud-configs
+users:
+- name: nightscout
+  uid: 2000
+  groups: docker
+
+mount_default_fields: [ None, None, "auto", "defaults,nofail", "0", "2" ]
+mounts:
+  - [ '/dev/sdb1', '/mnt/disks/data' ]
+
+write_files:
+- path: /tmp/init-data-drive.sh
+  permissions: 0755
+  owner: root
+  content: |
+    #!/bin/bash
+    ALREADY_PARTITIONED=$(sfdisk --list /dev/sdb | grep sdb1 | wc -l)
+    if [ "${ALREADY_PARTITIONED}" == "0" ];
+    then
+      echo "Partitioning disk /dev/sdb"
+      echo ';' | sfdisk /dev/sdb
+      mkfs.ext4 /dev/sdb1
+    else
+      echo "Disk /dev/sdb is already partitioned"
+    fi
+
+- path: /etc/systemd/system/mongo.service
+  permissions: 0644
+  owner: root
+  content: |
+    [Unit]
+    Description=Mongo Docker container
+
+    [Service]
+    Environment="HOME=/home/nightscout"
+    ExecStartPre=/usr/bin/docker-credential-gcr configure-docker
+    ExecStart=/usr/bin/docker run --name mongodb \
+      -e MONGO_DATA_DIR=/mnt/disks/data/mongodb \
+      -p 27017:27017 \
+      -v /mnt/disks/data/mongodb:/data/db \
+      --restart always mongo:latest
+    ExecStop=/usr/bin/docker stop mongodb
+    ExecStopPost=/usr/bin/docker rm mongodb
+
+    [Install]
+    WantedBy=gcr-online.target
+
+- path: /etc/systemd/system/mongo-create-db.service
+  permissions: 0644
+  owner: root
+  content: |
+    [Unit]
+    Description=Mongo Create Root User and DB
+    After=mongo.service
+    Requires=mongo.service
+
+    [Service]
+    Type=oneshot
+    RemainAfterExit=true
+    Environment="HOME=/home/nightscout"
+    ExecStartPre=/usr/bin/docker-credential-gcr configure-docker
+    ExecStart=/usr/bin/docker run --name mongodb_create_db \
+      --link mongodb \
+      mongo:latest \
+      mongo --host mongodb \
+        --eval "try { db.getSiblingDB('nightscout').createUser({user:'nightscout', pwd:'somepassword', roles:[{role:'readWrite',db:'nightscout'}]}); } catch(err) { print(err.name + ': "' + err.message +  '" occurred when creating nightscout user.'); }"
+    ExecStopPost=/usr/bin/docker rm mongodb_create_db
+
+    [Install]
+    WantedBy=gcr-online.target
+
+- path: /etc/systemd/system/nightscout.service
+  permissions: 0644
+  owner: root
+  content: |
+    [Unit]
+    Description=Nightscout Docker container
+    After=mongo-create-db.service
+    Requires=mongo-create-db.service
+
+    # API_SECRET passphrase: Z79FlFPPloy2
+    [Service]
+    Environment="HOME=/home/nightscout"
+    ExecStartPre=/usr/bin/docker-credential-gcr configure-docker
+    ExecStart=/usr/bin/docker run --name nightscout \
+      -e MONGO_CONNECTION=mongodb://nightscout:somepassword@mongodb:27017/nightscout \
+      -e DISPLAY_UNITS={{DISPLAY_UNITS}} \
+      -e API_SECRET=382ca7bc7a39d229dc4759c5f2e718282f23d2a8 \
+      -e DEVICESTATUS_ADVANCED="true" \
+      -e ENABLE="careportal boluscalc food iob cob bwp cage sage iage basal ar2 rawbg pushover bgi pump openaps" \
+      -e PUMP_FIELDS="reservoir battery clo" \
+      -e PUMP_WARN_BATT_P=30 \
+      -e PUMP_URGENT_BATT_P=20 \
+      --link mongodb \
+      -p 80:1337 \
+      --restart always wouterla/nightscout:latest
+    ExecStop=/usr/bin/docker stop nightscout
+    ExecStopPost=/usr/bin/docker rm nightscout
+
+    [Install]
+    WantedBy=gcr-online.target
+
+runcmd:
+- /tmp/init-data-drive.sh
+- mount -a
+- mkdir -p /mnt/disks/data/mongodb
+- systemctl daemon-reload
+- systemctl start mongodb
+- systemctl start mongo-create-db
+- systemctl start nightscout
