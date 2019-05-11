@@ -6,7 +6,7 @@ users:
 
 mount_default_fields: [ None, None, "auto", "defaults,nofail", "0", "2" ]
 mounts:
-  - [ '/dev/sdb1', '/mnt/disks/data' ]
+  - [ '/dev/sdb', '/mnt/disks/data' ]
 
 write_files:
 - path: /tmp/init-data-drive.sh
@@ -84,7 +84,7 @@ write_files:
     ExecStartPre=/usr/bin/docker-credential-gcr configure-docker
     ExecStart=/usr/bin/docker run --name nightscout \
       -e MONGO_CONNECTION=mongodb://nightscout:somepassword@mongodb:27017/nightscout \
-      -e DISPLAY_UNITS={{DISPLAY_UNITS}} \
+      -e DISPLAY_UNITS=mmol \
       -e API_SECRET=382ca7bc7a39d229dc4759c5f2e718282f23d2a8 \
       -e DEVICESTATUS_ADVANCED="true" \
       -e ENABLE="careportal boluscalc food iob cob bwp cage sage iage basal ar2 rawbg pushover bgi pump openaps" \
